@@ -4,13 +4,17 @@
 #include "ns3/mobility-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/udp-client-server-helper.h"
-
+#include "ns3/on-off-helper.h"
+#include "ns3/packet-sink-helper.h"
 #include "ns3/ssid.h"
 #include "ns3/node-container.h"
 #include "ns3/boolean.h"
 #include "ns3/string.h"
 
 using namespace ns3;
+
+Ptr<PacketSink> sink;	/* pointer to sink app*/
+
 
 int main()
 {
@@ -19,18 +23,29 @@ int main()
 	Ssid ssid = Ssid("Lab410");
 	
 	/* Application Layer setting */
-	uint32_t maxPackets = 15;	/* maximum number of packets the application will send */
+	uint32_t port = 77;
 	uint32_t packetSize = 1024;	/* size of application layer packets (min = 12 bytes) */
-	double packetInterval = 1;	/* the time to wait between packets */
-	double stopTime = 10.0;		/* simulation stop time */
+	double simulationTime = 10.0;		/* simulation duration */
 	
-	bool udpClientServer = true;	/* use udp-client-server-helper => can trace delay */
+	/* use which application */
+	bool udpClientServer = false;	/* use udp-client-server-helper => can trace delay */
+	bool onOffApplication = true;	/* use on-off application => can use packet-sink */
+	
+	/* udp-client-server parameters */
+	uint32_t maxPackets = 10;	/* maximum number of packets the application will send */
+	double packetInterval = 0.5;	/* the time to wait between packets */
+	
+	/* on-off-helper parameters */
+	uint32_t maxBytes = 0; 		/* total number of bytes to send, 0 means no limit */
+	std::string appDataRate = "100Mbps";
+	std::string onTime = "ns3::ConstantRandomVariable[Constant=1.0]";	/* duration of on state */
+	std::string offTime = "ns3::ConstantRandomVariable[Constant=1.0]";	/* duration of off state */
+	
+	
+	/* log or not */
 	bool verbose = true;
 
 	/* WiFi standard list:
-	 * 	WIFI_STANDARD_80211a		11a
-	 * 	WIFI_STANDARD_80211b		11b
-	 * 	WIFI_STANDARD_80211g		11g
 	 * 	WIFI_STANDARD_80211n_2_4GHZ	11n_2_4
 	 * 	WIFI_STANDARD_80211n_5GHZ	11n_5
 	 * 	WIFI_STANDARD_80211ac		11ac
@@ -38,13 +53,19 @@ int main()
 	 * 	WIFI_STANDARD_80211ax_5GHZ	11ax_5
 	 * 	WIFI_STANDARD_80211ax_6GHZ	11ax_6
 	 * */
-	std::string standard = "11a";
+	//std::string standard = "11n_2_4";
+	//std::string standard = "11n_5";
+	std::string standard = "11ac";
+	//std::string standard = "11ax_2_4";
+	//std::string standard = "11ax_5";
+	//std::string standard = "11ax_6";
 	
 
 	if(verbose)
 	{
 		//LogComponaentEnable("UdpClient", LOG_LEVEL_INFO);
 		LogComponentEnable("UdpServer", LOG_LEVEL_INFO);	/* use UDP timestamp trace delay */
+		//LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);	/* use UDP timestamp trace delay */
 	}
 
 	/* create nodes */
@@ -73,11 +94,7 @@ int main()
 	/* create wifi helper */
 	WifiHelper wifi;
 	std::string phyRate;
-	if(standard == "11a"){
-		wifi.SetStandard(WIFI_STANDARD_80211a);
-		phyRate = "OfdmRate6Mbps";
-	}
-	else if(standard == "11n_2_4"){
+	if(standard == "11n_2_4"){
 		wifi.SetStandard(WIFI_STANDARD_80211n_2_4GHZ);
 		phyRate = "HtMcs0";
 	}
@@ -135,11 +152,16 @@ int main()
 	/* use UDP client/server => can use packet timestamp to trace delay */
 	if(udpClientServer == true)
 	{
-		/* create UDP server and client */
-		uint32_t port = 77;
+		/* create UDP server on AP to receive packets */
 		UdpServerHelper udpServer;
 		udpServer.SetAttribute("Port", UintegerValue(port));
 
+		ApplicationContainer serverApp;		/* server app receive packets from client */
+		serverApp = udpServer.Install(apNodes);
+		serverApp.Start(Seconds(1.0));		/* AP start to receive packets */
+		serverApp.Stop(Seconds(simulationTime));	/* AP stop receiving packets */
+		
+		/* create UDP client on STAs to send packets to AP */
 		UdpClientHelper udpClient;
 		udpClient.SetAttribute("RemoteAddress", AddressValue(apAddr.GetAddress(0)));
 		udpClient.SetAttribute("RemotePort", UintegerValue(port));
@@ -147,24 +169,53 @@ int main()
 		udpClient.SetAttribute("Interval", TimeValue(Seconds(packetInterval)));
 		udpClient.SetAttribute("PacketSize", UintegerValue(packetSize));
 
-		/* create application of server and client */
-		ApplicationContainer serverApp;		/* server app receive packets from client */
-		serverApp = udpServer.Install(apNodes);
-		serverApp.Start(Seconds(1.0));		/* AP start to receive packets */
-		serverApp.Stop(Seconds(stopTime));	/* AP stop receiving packets */
-
-
 		ApplicationContainer clientApp;		/* client app send packets to server*/
 		clientApp = udpClient.Install(staNodes);
-		clientApp.Start(Seconds(7.0));		/* STAs start to send packets */
-		clientApp.Stop(Seconds(stopTime));	/* STAs stop sending packets */
+		clientApp.Start(Seconds(2.0));		/* STAs start to send packets */
+		clientApp.Stop(Seconds(simulationTime));	/* STAs stop sending packets */
 	}
+	if(onOffApplication == true)
+	{
+		/* create sink-application on AP to receive packets from STAs */
+		PacketSinkHelper sinkHelper("ns3::UdpSocketFactory", InetSocketAddress(apAddr.GetAddress(0), port));
+
+		ApplicationContainer serverApp;
+		serverApp = sinkHelper.Install(apNodes);
+		serverApp.Start(Seconds(1.0));		/* AP start to receive packets */
+		serverApp.Stop(Seconds(simulationTime));	/* AP stop receiving packets */
+		
+		sink = StaticCast<PacketSink>(serverApp.Get(0));	/* pointer of sinkHelper*/	
+		
+		/* create on-off-server on STAS to send packets to AP */
+		OnOffHelper onOffServer("ns3::UdpSocketFactory",InetSocketAddress(apAddr.GetAddress(0), port));
+		onOffServer.SetAttribute("DataRate", DataRateValue(DataRate(appDataRate)));
+		onOffServer.SetAttribute("PacketSize", UintegerValue(packetSize));
+		onOffServer.SetAttribute("OnTime", StringValue(onTime));
+		onOffServer.SetAttribute("OffTime", StringValue(offTime));
+		onOffServer.SetAttribute("MaxBytes", UintegerValue(maxBytes));
+		
+		ApplicationContainer clientApp;		/* client app send packets to server*/
+		clientApp = onOffServer.Install(staNodes);
+		clientApp.Start(Seconds(2.0));		/* STAs start to send packets */
+		clientApp.Stop(Seconds(simulationTime));	/* STAs stop sending packets */
+	}
+	
+	
 	/* Ipv4 routing table */
 	Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 	
 	/* start simulation */
-	Simulator::Stop(Seconds(stopTime));
+	Simulator::Stop(Seconds(simulationTime));
 	Simulator::Run();
+	
+	/* calculate throughput */
+	if(onOffApplication == true)
+	{
+		double averageThroughput = ((sink->GetTotalRx() * 8) / (1e6 * simulationTime));
+		std::cout << "\nWiFi Standard: "<< standard;
+		std::cout << " => Average throughput: "<< averageThroughput << "Mbits/s" << std::endl;
+	}
+
 	Simulator::Destroy();
 
 
