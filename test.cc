@@ -14,10 +14,32 @@
 using namespace ns3;
 
 Ptr<PacketSink> sink;	/* pointer to sink app*/
+double lastTotalRx = 0;	/* record the last total received bytes */
 
 
-int main()
+void CalculateThroughput()
 {
+	Time now = Simulator::Now();
+	double totalRx = (sink->GetTotalRx() - lastTotalRx) * (double) 8 / 1e5; /* calculate Rx packets in Mbit/s */
+	std::cout << now.GetSeconds() << "s: " << totalRx << "Mbit/s" << std::endl ;
+	lastTotalRx = sink->GetTotalRx();
+	Simulator::Schedule(MilliSeconds(100), &CalculateThroughput);
+}
+
+/** 
+ * @brief use specific WiFi standard and PHY rate to run simulation, and calculating the throughput/delay 
+ * 
+ * param standard which WiFi standard the simulation will use
+ * param phyRate which MCS the WiFi PHY will use (1 spatial stream)
+ *
+ */
+void RunSimulation(std::string standard, std::string phyRate)
+{
+	/* log or not */
+	bool verbose = true;				/* log or not */
+	bool calculateThroughputPerSecond = false;	/* run CalculateThroughput or not*/
+	
+	/* topology parameters */
 	uint32_t nSta = 1;
 	uint32_t nAp = 1;
 	Ssid ssid = Ssid("Lab410");
@@ -37,29 +59,10 @@ int main()
 	
 	/* on-off-helper parameters */
 	uint32_t maxBytes = 0; 		/* total number of bytes to send, 0 means no limit */
-	std::string appDataRate = "100Mbps";
+	std::string appDataRate = "500Mbps";
 	std::string onTime = "ns3::ConstantRandomVariable[Constant=1.0]";	/* duration of on state */
-	std::string offTime = "ns3::ConstantRandomVariable[Constant=1.0]";	/* duration of off state */
-	
-	
-	/* log or not */
-	bool verbose = true;
-
-	/* WiFi standard list:
-	 * 	WIFI_STANDARD_80211n_2_4GHZ	11n_2_4
-	 * 	WIFI_STANDARD_80211n_5GHZ	11n_5
-	 * 	WIFI_STANDARD_80211ac		11ac
-	 * 	WIFI_STANDARD_80211ax_2_4GHZ	11ax_2_4
-	 * 	WIFI_STANDARD_80211ax_5GHZ	11ax_5
-	 * 	WIFI_STANDARD_80211ax_6GHZ	11ax_6
-	 * */
-	//std::string standard = "11n_2_4";
-	//std::string standard = "11n_5";
-	std::string standard = "11ac";
-	//std::string standard = "11ax_2_4";
-	//std::string standard = "11ax_5";
-	//std::string standard = "11ax_6";
-	
+	std::string offTime = "ns3::ConstantRandomVariable[Constant=0.0]";	/* duration of off state */
+		
 
 	if(verbose)
 	{
@@ -93,35 +96,35 @@ int main()
 
 	/* create wifi helper */
 	WifiHelper wifi;
-	std::string phyRate;
+	std::string controlPhyRate;	/* dataRate of control frame */
 	if(standard == "11n_2_4"){
 		wifi.SetStandard(WIFI_STANDARD_80211n_2_4GHZ);
-		phyRate = "HtMcs0";
+		controlPhyRate = "HtMcs0";
 	}
 	else if(standard == "11n_5"){
 		wifi.SetStandard(WIFI_STANDARD_80211n_5GHZ);
-		phyRate = "HtMcs0";
+		controlPhyRate = "HtMcs0";
 	}
 	else if(standard == "11ac"){
 		wifi.SetStandard(WIFI_STANDARD_80211ac);
-		phyRate = "VhtMcs0";
+		controlPhyRate = "VhtMcs0";
 	}
 	else if(standard == "11ax_2_4"){
 		wifi.SetStandard(WIFI_STANDARD_80211ax_2_4GHZ);
-		phyRate = "HeMcs0";
+		controlPhyRate = "HeMcs0";
 	}
 	else if(standard == "11ax_5"){
 		wifi.SetStandard(WIFI_STANDARD_80211ax_5GHZ);
-		phyRate = "HeMcs0";
+		controlPhyRate = "HeMcs0";
 	}
 	else if(standard == "11ax_6"){
 		wifi.SetStandard(WIFI_STANDARD_80211ax_6GHZ);
-		phyRate = "HeMcs0";
+		controlPhyRate = "HeMcs0";
 	}
 
 	wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager",
 				     "DataMode", StringValue(phyRate),
-				     "ControlMode", StringValue(phyRate));
+				     "ControlMode", StringValue(controlPhyRate));
 	
 	/* create devices */
 	NetDeviceContainer staDevices;
@@ -156,9 +159,9 @@ int main()
 		UdpServerHelper udpServer;
 		udpServer.SetAttribute("Port", UintegerValue(port));
 
-		ApplicationContainer serverApp;		/* server app receive packets from client */
+		ApplicationContainer serverApp;			/* server app receive packets from client */
 		serverApp = udpServer.Install(apNodes);
-		serverApp.Start(Seconds(1.0));		/* AP start to receive packets */
+		serverApp.Start(Seconds(0.1));			/* AP start to receive packets */
 		serverApp.Stop(Seconds(simulationTime));	/* AP stop receiving packets */
 		
 		/* create UDP client on STAs to send packets to AP */
@@ -169,9 +172,9 @@ int main()
 		udpClient.SetAttribute("Interval", TimeValue(Seconds(packetInterval)));
 		udpClient.SetAttribute("PacketSize", UintegerValue(packetSize));
 
-		ApplicationContainer clientApp;		/* client app send packets to server*/
+		ApplicationContainer clientApp;			/* client app send packets to server*/
 		clientApp = udpClient.Install(staNodes);
-		clientApp.Start(Seconds(2.0));		/* STAs start to send packets */
+		clientApp.Start(Seconds(0.3));			/* STAs start to send packets */
 		clientApp.Stop(Seconds(simulationTime));	/* STAs stop sending packets */
 	}
 	if(onOffApplication == true)
@@ -181,8 +184,8 @@ int main()
 
 		ApplicationContainer serverApp;
 		serverApp = sinkHelper.Install(apNodes);
-		serverApp.Start(Seconds(1.0));		/* AP start to receive packets */
-		serverApp.Stop(Seconds(simulationTime));	/* AP stop receiving packets */
+		serverApp.Start(Seconds(0.0));				/* AP start to receive packets */
+		//serverApp.Stop(Seconds(simulationTime));		/* AP stop receiving packets */
 		
 		sink = StaticCast<PacketSink>(serverApp.Get(0));	/* pointer of sinkHelper*/	
 		
@@ -194,10 +197,10 @@ int main()
 		onOffServer.SetAttribute("OffTime", StringValue(offTime));
 		onOffServer.SetAttribute("MaxBytes", UintegerValue(maxBytes));
 		
-		ApplicationContainer clientApp;		/* client app send packets to server*/
+		ApplicationContainer clientApp;			/* client app send packets to server*/
 		clientApp = onOffServer.Install(staNodes);
-		clientApp.Start(Seconds(2.0));		/* STAs start to send packets */
-		clientApp.Stop(Seconds(simulationTime));	/* STAs stop sending packets */
+		clientApp.Start(Seconds(1.0));			/* STAs start to send packets */
+		//clientApp.Stop(Seconds(simulationTime));	/* STAs stop sending packets */
 	}
 	
 	
@@ -205,19 +208,88 @@ int main()
 	Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 	
 	/* start simulation */
-	Simulator::Stop(Seconds(simulationTime));
+	if(calculateThroughputPerSecond == true)
+	{
+		Simulator::Schedule(Seconds(1.1), &CalculateThroughput);
+	}
+	Simulator::Stop(Seconds(simulationTime + 1));
 	Simulator::Run();
 	
+
 	/* calculate throughput */
 	if(onOffApplication == true)
 	{
 		double averageThroughput = ((sink->GetTotalRx() * 8) / (1e6 * simulationTime));
-		std::cout << "\nWiFi Standard: "<< standard;
-		std::cout << " => Average throughput: "<< averageThroughput << "Mbits/s" << std::endl;
+		std::cout  << standard << "\t\t" << phyRate << "\t\t\t";
+		std::cout  << averageThroughput << std::endl;
 	}
 
 	Simulator::Destroy();
+}
 
+int main()
+{
+	/* WiFi standard list:
+	 * 	WIFI_STANDARD_80211n_2_4GHZ	11n_2_4
+	 * 	WIFI_STANDARD_80211n_5GHZ	11n_5
+	 * 	WIFI_STANDARD_80211ac		11ac
+	 * 	WIFI_STANDARD_80211ax_2_4GHZ	11ax_2_4
+	 * 	WIFI_STANDARD_80211ax_5GHZ	11ax_5
+	 * 	WIFI_STANDARD_80211ax_6GHZ	11ax_6
+	 * */
+	std::string standardList[6] = { "11n_2_4", 
+				        "11n_5",
+				        "11ac",
+				        "11ax_2_4",
+					"11ax_5",
+					"11ax_6"};
 
-	return 0;
+	std::string HtMcs[8] =
+        {
+                "HtMcs0", "HtMcs1", "HtMcs2", "HtMcs3", "HtMcs4",
+                "HtMcs5", "HtMcs6", "HtMcs7"
+        };	
+	std::string VhtMcs[10] = 
+	{
+		"VhtMcs0", "VhtMcs1", "VhtMcs2", "VhtMcs3", "VhtMcs4",
+		"VhtMcs5", "VhtMcs6", "VhtMcs7", "VhtMcs8", "VhtMcs9"
+	};
+	std::string HeMcs[12] = 
+	{
+		"HeMcs0", "HeMcs1", "HeMcs2", "HeMcs3", "HeMcs4", "HeMcs5",
+		"HeMcs6", "HeMcs7", "HeMcs8", "HeMcs9", "HeMcs10", "HeMcs11"
+	};
+	
+	std::cout << "WiFi Standard\t" << "MCS\t";
+	std::cout << "Average throughput (Mbits/s)" << std::endl;
+	
+	uint8_t j;
+	for(j = 0; j < 8; j++)
+	{
+		RunSimulation(standardList[0], HtMcs[j]);
+	}
+	for(j = 0; j < 8; j++)
+	{
+		RunSimulation(standardList[1], HtMcs[j]);
+	}
+	for(uint8_t j = 0; j <10; j++)
+	{
+		RunSimulation(standardList[2], VhtMcs[j]);
+	}
+	for(uint8_t j = 0; j < 12; j++)
+	{
+		RunSimulation(standardList[3], HeMcs[j]);
+	}
+	for(uint8_t j = 0; j < 12; j++)
+	{
+		RunSimulation(standardList[4], HeMcs[j]);
+	}
+	for(uint8_t j = 0; j < 12; j++)
+	{
+		RunSimulation(standardList[5], HeMcs[j]);
+	}
+	
+	
+	
+	return 0;	
 }
