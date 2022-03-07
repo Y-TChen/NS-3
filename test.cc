@@ -47,7 +47,7 @@ void RunSimulation(std::string standard, std::string phyRate)
 	/* Application Layer setting */
 	uint32_t port = 77;
 	uint32_t packetSize = 1024;	/* size of application layer packets (min = 12 bytes) */
-	double simulationTime = 10.0;		/* simulation duration */
+	double simulationTime = 2.0;		/* simulation duration */
 	
 	/* use which application */
 	bool udpClientServer = false;	/* use udp-client-server-helper => can trace delay */
@@ -83,16 +83,31 @@ void RunSimulation(std::string standard, std::string phyRate)
 	/* create wifi phy */
 	YansWifiPhyHelper phy;
 	phy.SetChannel(channel.Create());
-
-	/* create wifi mac */
-	WifiMacHelper staMac;
-	WifiMacHelper apMac;
-	staMac.SetType("ns3::StaWifiMac",
-		       "ActiveProbing", BooleanValue(false),
-		       "Ssid", SsidValue(ssid));
-	apMac.SetType("ns3::ApWifiMac",
-		       "Ssid", SsidValue(ssid));
-
+	/*
+	 * WifiPhy Atrributes:
+	 * 1. ChannelNumber		: 0 ~ 233
+	 * 2. ChannelWidth(MHz)		: 5, 10, 20, 22, 40, 80, 160
+	 * 3. ChannelSwitchDelay	: delay between two short frames transmitted on different frequencies
+	 * 4. Frequency			: center frequency of current operation channel
+	 * 5. Antennas			: number of antennas on the device 1 ~ 8
+	 * 6. MaxSupportedTxSpatialStreams	: only valuable for 11n/ac/ax STAs and APs 1 ~ 8
+	 * 7. MaxSupportedRxSpatialStreams	: 1 ~ 8
+	 * */
+	
+	uint8_t channelNumber = 36;
+	uint8_t channelWidth = 20;
+	uint32_t frequency = 5180;
+	uint8_t antennas = 1;
+	uint8_t supportedRxSS = 1;
+	uint8_t supportedTxSS = 1;
+	/* channel number, channel width, WifiPhyBband, primary20 index */
+	phy.Set("ChannelNumber", UintegerValue(channelNumber));
+	phy.Set("ChannelWidth", UintegerValue(channelWidth));
+	phy.Set("Frequency", UintegerValue(frequency)); 
+	phy.Set("ChannelSwitchDelay", TimeValue(MicroSeconds(250)));
+	phy.Set("Antennas", UintegerValue(antennas));
+	phy.Set("MaxSupportedTxSpatialStreams", UintegerValue(supportedTxSS));
+	phy.Set("MaxSupportedRxSpatialStreams", UintegerValue(supportedRxSS));
 
 	/* create wifi helper */
 	WifiHelper wifi;
@@ -105,7 +120,7 @@ void RunSimulation(std::string standard, std::string phyRate)
 		wifi.SetStandard(WIFI_STANDARD_80211n_5GHZ);
 		controlPhyRate = "HtMcs0";
 	}
-	else if(standard == "11ac"){
+	else if(standard == "11ac_5"){
 		wifi.SetStandard(WIFI_STANDARD_80211ac);
 		controlPhyRate = "VhtMcs0";
 	}
@@ -125,6 +140,15 @@ void RunSimulation(std::string standard, std::string phyRate)
 	wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager",
 				     "DataMode", StringValue(phyRate),
 				     "ControlMode", StringValue(controlPhyRate));
+	
+	/* create wifi mac */
+	WifiMacHelper staMac;
+	WifiMacHelper apMac;
+	staMac.SetType("ns3::StaWifiMac",
+		       "ActiveProbing", BooleanValue(false),
+		       "Ssid", SsidValue(ssid));
+	apMac.SetType("ns3::ApWifiMac",
+		       "Ssid", SsidValue(ssid));
 	
 	/* create devices */
 	NetDeviceContainer staDevices;
@@ -232,28 +256,37 @@ int main()
 	/* WiFi standard list:
 	 * 	WIFI_STANDARD_80211n_2_4GHZ	11n_2_4
 	 * 	WIFI_STANDARD_80211n_5GHZ	11n_5
-	 * 	WIFI_STANDARD_80211ac		11ac
+	 * 	WIFI_STANDARD_80211ac		11ac_5
 	 * 	WIFI_STANDARD_80211ax_2_4GHZ	11ax_2_4
 	 * 	WIFI_STANDARD_80211ax_5GHZ	11ax_5
 	 * 	WIFI_STANDARD_80211ax_6GHZ	11ax_6
 	 * */
 	std::string standardList[6] = { "11n_2_4", 
 				        "11n_5",
-				        "11ac",
+				        "11ac_5",
 				        "11ax_2_4",
 					"11ax_5",
 					"11ax_6"};
-
+	/* for HT:
+	 * 	=> 1SS: bandwidth 20MHz/40MHz => Mcs0 - Mcs7
+	 * */
 	std::string HtMcs[8] =
         {
                 "HtMcs0", "HtMcs1", "HtMcs2", "HtMcs3", "HtMcs4",
                 "HtMcs5", "HtMcs6", "HtMcs7"
         };	
+	/* for VHT:
+	 *	=> 1SS: bandwidth 20MHz => Mcs0 - Mcs8
+	 *		bandwidth 40MHz/80MHz/160MHz => Mcs0 - Mcs9
+	 * */
 	std::string VhtMcs[10] = 
 	{
 		"VhtMcs0", "VhtMcs1", "VhtMcs2", "VhtMcs3", "VhtMcs4",
 		"VhtMcs5", "VhtMcs6", "VhtMcs7", "VhtMcs8", "VhtMcs9"
 	};
+	/* for HE:
+	 *	=> 1SS: bandwidth 20MHz/40MHz/80MHz/160MHz => Mcs0 - Mcs11
+	 * */
 	std::string HeMcs[12] = 
 	{
 		"HeMcs0", "HeMcs1", "HeMcs2", "HeMcs3", "HeMcs4", "HeMcs5",
@@ -264,31 +297,35 @@ int main()
 	std::cout << "Average throughput (Mbits/s)" << std::endl;
 	
 	uint8_t j;
+	/*
 	for(j = 0; j < 8; j++)
 	{
 		RunSimulation(standardList[0], HtMcs[j]);
 	}
+	
 	for(j = 0; j < 8; j++)
 	{
 		RunSimulation(standardList[1], HtMcs[j]);
 	}
-	for(uint8_t j = 0; j <10; j++)
+	*/
+	for(j = 0; j <9; j++)
 	{
 		RunSimulation(standardList[2], VhtMcs[j]);
 	}
-	for(uint8_t j = 0; j < 12; j++)
+	/*
+	for(j = 0; j < 12; j++)
 	{
 		RunSimulation(standardList[3], HeMcs[j]);
 	}
-	for(uint8_t j = 0; j < 12; j++)
+	for(j = 0; j < 12; j++)
 	{
 		RunSimulation(standardList[4], HeMcs[j]);
 	}
-	for(uint8_t j = 0; j < 12; j++)
+	for(j = 0; j < 12; j++)
 	{
 		RunSimulation(standardList[5], HeMcs[j]);
 	}
-	
+	*/
 	
 	
 	return 0;	
