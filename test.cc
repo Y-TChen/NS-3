@@ -47,15 +47,15 @@ void RunSimulation(std::string standard, std::string phyRate)
 	/* Application Layer setting */
 	uint32_t port = 77;
 	uint32_t packetSize = 1024;	/* size of application layer packets (min = 12 bytes) */
-	double simulationTime = 2.0;		/* simulation duration */
+	double simulationTime = 10.0;		/* simulation duration */
 	
 	/* use which application */
 	bool udpClientServer = false;	/* use udp-client-server-helper => can trace delay */
 	bool onOffApplication = true;	/* use on-off application => can use packet-sink */
 	
 	/* udp-client-server parameters */
-	uint32_t maxPackets = 10;	/* maximum number of packets the application will send */
-	double packetInterval = 0.5;	/* the time to wait between packets */
+	uint32_t maxPackets = 0;	/* maximum number of packets the application will send */
+	double packetInterval = 0;	/* the time to wait between packets */
 	
 	/* on-off-helper parameters */
 	uint32_t maxBytes = 0; 		/* total number of bytes to send, 0 means no limit */
@@ -68,7 +68,7 @@ void RunSimulation(std::string standard, std::string phyRate)
 	{
 		//LogComponaentEnable("UdpClient", LOG_LEVEL_INFO);
 		LogComponentEnable("UdpServer", LOG_LEVEL_INFO);	/* use UDP timestamp trace delay */
-		//LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);	/* use UDP timestamp trace delay */
+		//LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
 	}
 
 	/* create nodes */
@@ -94,6 +94,15 @@ void RunSimulation(std::string standard, std::string phyRate)
 	 * 7. MaxSupportedRxSpatialStreams	: 1 ~ 8
 	 * */
 	
+
+	/* Channel number v.s. frequency:
+	 * => 2.4GHz: 
+	 * 	1:2412 
+	 * 	2:2417
+	 * => 5GHz:
+	 * 	36:5180 
+	 *	40:5200
+	 * */
 	uint8_t channelNumber = 36;
 	uint8_t channelWidth = 20;
 	uint32_t frequency = 5180;
@@ -185,8 +194,8 @@ void RunSimulation(std::string standard, std::string phyRate)
 
 		ApplicationContainer serverApp;			/* server app receive packets from client */
 		serverApp = udpServer.Install(apNodes);
-		serverApp.Start(Seconds(0.1));			/* AP start to receive packets */
-		serverApp.Stop(Seconds(simulationTime));	/* AP stop receiving packets */
+		serverApp.Start(Seconds(0.0));			/* AP start to receive packets */
+		//serverApp.Stop(Seconds(simulationTime));	/* AP stop receiving packets */
 		
 		/* create UDP client on STAs to send packets to AP */
 		UdpClientHelper udpClient;
@@ -198,8 +207,8 @@ void RunSimulation(std::string standard, std::string phyRate)
 
 		ApplicationContainer clientApp;			/* client app send packets to server*/
 		clientApp = udpClient.Install(staNodes);
-		clientApp.Start(Seconds(0.3));			/* STAs start to send packets */
-		clientApp.Stop(Seconds(simulationTime));	/* STAs stop sending packets */
+		clientApp.Start(Seconds(1.0));			/* STAs start to send packets */
+		//clientApp.Stop(Seconds(simulationTime));	/* STAs stop sending packets */
 	}
 	if(onOffApplication == true)
 	{
@@ -232,7 +241,7 @@ void RunSimulation(std::string standard, std::string phyRate)
 	Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 	
 	/* start simulation */
-	if(calculateThroughputPerSecond == true)
+	if(onOffApplication == true && calculateThroughputPerSecond == true)
 	{
 		Simulator::Schedule(Seconds(1.1), &CalculateThroughput);
 	}
@@ -297,36 +306,35 @@ int main()
 	std::cout << "Average throughput (Mbits/s)" << std::endl;
 	
 	uint8_t j;
+	/* 20MHz bandwidth, 5GHz simulation */
+	for(j = 0; j < 8; j++)
+	{
+		RunSimulation(standardList[1], HtMcs[j]);
+	}
+	for(j = 0; j <9; j++)
+	{
+		RunSimulation(standardList[2], VhtMcs[j]);
+	}
+	for(j = 0; j < 12; j++)
+	{
+		RunSimulation(standardList[4], HeMcs[j]);
+	}
+	
+	/* 40MHz bandwidth, 2.4GHz simulation */
 	/*
 	for(j = 0; j < 8; j++)
 	{
 		RunSimulation(standardList[0], HtMcs[j]);
 	}
-	
-	for(j = 0; j < 8; j++)
-	{
-		RunSimulation(standardList[1], HtMcs[j]);
-	}
-	*/
-	for(j = 0; j <9; j++)
-	{
-		RunSimulation(standardList[2], VhtMcs[j]);
-	}
-	/*
 	for(j = 0; j < 12; j++)
 	{
 		RunSimulation(standardList[3], HeMcs[j]);
 	}
 	for(j = 0; j < 12; j++)
 	{
-		RunSimulation(standardList[4], HeMcs[j]);
-	}
-	for(j = 0; j < 12; j++)
-	{
 		RunSimulation(standardList[5], HeMcs[j]);
 	}
 	*/
-	
 	
 	return 0;	
 }
